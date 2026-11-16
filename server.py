@@ -93,38 +93,51 @@ async def find_beers_on_tap(
 
 
 @server.tool(annotations=_PUBLIC_READ)
-async def venue_taplist(venue: str, latitude: float, longitude: float, radius: Radius = '10_miles') -> dict[str, Any]:
+async def venue_taplist(venue: str, latitude: float, longitude: float) -> dict[str, Any]:
     """Everything on tap at one venue, by venue name (partial names work).
     latitude/longitude: roughly where the venue is (the city is close enough).
-    If the name matches several venues, the closest is returned and the
-    others are listed in other_matches."""
+    If the name matches several venues, an exact name match wins, else the
+    closest; the others are listed in other_matches."""
     _check_location(latitude, longitude)
     name = clean_text(venue, 80)
     if not name:
         raise ToolError('venue is required.')
+    # /taplist's venueName filter matches whole names only, so resolve the
+    # (possibly partial) name with the venue search first.
+    found = await _upstream(api.browse_venues(latitude=latitude, longitude=longitude, search=name))
+    candidates = []
+    for v in found.get('venues', []):
+        loc = (v.get('places_data') or {}).get('location') or {}
+        if v.get('name') and v.get('slug') and loc.get('latitude') is not None and loc.get('longitude') is not None:
+            candidates.append((v, loc, shape_venue(v, latitude, longitude)))
+    if not candidates:
+        return {'venue': None, 'beers': [], 'note': f'No venue matching "{name}". Try find_venues.'}
+    candidates.sort(key=lambda c: (c[0]['name'].casefold() != name.casefold(), c[2]['distance_miles'] or 0))
+    chosen, loc, shaped = candidates[0]
+
+    # Fetch at the venue's own coordinates and keep only its rows, so a
+    # same-named venue elsewhere can't mix in.
     data = await _upstream(api.taplist(
-        latitude=latitude, longitude=longitude, radius=radius, limit=100, venue=name,
+        latitude=loc['latitude'], longitude=loc['longitude'], radius='quarter_mile', limit=100,
+        venue=chosen['name'],
     ))
-    rows = data.get('beers', [])
-    if not rows:
-        return {'venue': None, 'beers': [], 'note': f'No venue matching "{name}" with beers on tap within {radius}.'}
-    # Rows are nearest-first, so the first venue is the closest match.
-    first_id = rows[0].get('venue_id')
-    mine = [r for r in rows if r.get('venue_id') == first_id]
-    others = sorted({r.get('venue_name') for r in rows if r.get('venue_id') != first_id and r.get('venue_name')})
+    mine = [r for r in data.get('beers', []) if r.get('venue_slug') == chosen['slug']]
     beers = [shape_beer(r) for r in mine[:MAX_VENUE_TAPLIST]]
-    head = dict(beers[0])
     for b in beers:
         for k in ('venue', 'venue_address', 'venue_url', 'distance_miles'):
             b.pop(k, None)
-    return {
-        'venue': head['venue'],
-        'address': head['venue_address'],
-        'venue_url': head['venue_url'],
+    result = {
+        'venue': shaped['venue'],
+        'address': shaped['address'],
+        'distance_miles': shaped['distance_miles'],
+        'venue_url': shaped['venue_url'],
         'beer_count': len(mine),
         'beers': beers,
-        'other_matches': [clean_text(o, 120) for o in others[:10]],
+        'other_matches': [c[2]['venue'] for c in candidates[1:11]],
     }
+    if not beers:
+        result['note'] = 'What\'s Next tracks this venue but has no beers on tap listed for it right now.'
+    return result
 
 
 @server.tool(annotations=_PUBLIC_READ)
