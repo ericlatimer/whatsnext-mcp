@@ -50,3 +50,7 @@ python3.14 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
 PATH=".venv/bin:$PATH" func start         # same server behind the Functions host, :7071
 .venv/bin/python smoke.py [URL]           # end-to-end: list tools, call each (MCP_API_KEY env if needed)
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -8,3 +8,4 @@ pytest.ini
 local.settings.json
 deploy/
 *.md
+LICENSE
