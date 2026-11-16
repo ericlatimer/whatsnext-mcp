@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.python_packages/
+local.settings.json
+*.zip
