@@ -20,28 +20,61 @@ from collections import deque
 log = logging.getLogger('whatsnext_mcp.guard')
 
 PER_IP_PER_MINUTE = 30
-GLOBAL_PER_HOUR = 1500
+# Sized to the upstream, not this server: What's Next's database is small and
+# already busy at peaks, and a cache miss here is one or two API calls there.
+# Override with the MCP_GLOBAL_PER_HOUR app setting.
+GLOBAL_PER_HOUR = 300
+
+
+def _parse_address(value: str):
+    """An IP from "1.2.3.4", "1.2.3.4:port", "[v6]:port" or "v6", else None."""
+    candidate = value.strip()
+    if candidate.startswith('[') and ']' in candidate:  # [v6]:port
+        candidate = candidate[1:candidate.index(']')]
+    elif candidate.count(':') == 1:  # v4:port
+        candidate = candidate.split(':')[0]
+    try:
+        return ipaddress.ip_address(candidate)
+    except ValueError:
+        return None
 
 
 def client_ip(scope) -> str:
-    """Rightmost public address in X-Forwarded-For (Azure's front end appends the
-    real client; anything to its left is caller-supplied and spoofable), else the
-    socket peer."""
+    """The caller's public address.
+
+    On Azure Functions the host proxies each request from inside the instance:
+    it rewrites X-Forwarded-For to 127.0.0.1 and the real caller arrives in
+    the App Service front end's CLIENT-IP header ("addr:port"). Fall back to
+    the rightmost public X-Forwarded-For entry (other proxies append the real
+    client; anything to its left is caller-supplied), then the socket peer."""
     headers = {k.decode('latin-1').lower(): v.decode('latin-1') for k, v in scope.get('headers', [])}
+    addr = _parse_address(headers.get('client-ip', ''))
+    if addr and addr.is_global:
+        return str(addr)
     for part in reversed(headers.get('x-forwarded-for', '').split(',')):
-        candidate = part.strip()
-        if candidate.startswith('[') and ']' in candidate:  # [v6]:port
-            candidate = candidate[1:candidate.index(']')]
-        elif candidate.count(':') == 1:  # v4:port
-            candidate = candidate.split(':')[0]
-        try:
-            addr = ipaddress.ip_address(candidate)
-        except ValueError:
-            continue
-        if addr.is_global:
+        addr = _parse_address(part)
+        if addr and addr.is_global:
             return str(addr)
     client = scope.get('client')
     return client[0] if client else 'unknown'
+
+
+# Headers a proxy might carry the caller's address in. Logged (never the API
+# key) when no public address is found, to see what the Functions host sends.
+_FORWARDING_HEADERS = ('x-forwarded-for', 'x-client-ip', 'x-original-for', 'client-ip', 'x-real-ip',
+                       'x-azure-clientip', 'x-azure-socketip', 'forwarded', 'x-arr-log-id', 'x-ms-client-ip')
+
+
+def forwarding_headers(scope) -> dict:
+    headers = {k.decode('latin-1').lower(): v.decode('latin-1') for k, v in scope.get('headers', [])}
+    return {k: headers[k][:120] for k in _FORWARDING_HEADERS if k in headers} | {'_names': sorted(headers)}
+
+
+def _is_public(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_global
+    except ValueError:
+        return False
 
 
 class SlidingWindow:
@@ -73,6 +106,7 @@ class GuardMiddleware:
         self.global_ = SlidingWindow(global_per_hour, 3600)
         self.clock = clock
         self._last_prune = 0.0
+        self._last_unresolved_log = float('-inf')
 
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'http':
@@ -86,6 +120,9 @@ class GuardMiddleware:
             self.per_ip.prune(now)
             self._last_prune = now
         ip = client_ip(scope)
+        if not _is_public(ip) and now - self._last_unresolved_log > 300:
+            self._last_unresolved_log = now
+            log.warning('CLIENT_IP_UNRESOLVED peer=%s headers=%s', ip, forwarding_headers(scope))
         if not self.per_ip.allow(ip, now):
             log.warning('RATE_LIMITED per_ip ip=%s', ip)
             return await _reply(send, 429, 'Too many requests; slow down.', retry_after=60)

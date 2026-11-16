@@ -17,11 +17,12 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from guard import GuardMiddleware
+from guard import GLOBAL_PER_HOUR, GuardMiddleware
+from telemetry import instrument
 from whatsnext_api import UpstreamError, WhatsNextApi, clean_text, shape_beer, shape_venue
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s %(message)s')
-for noisy in ('mcp', 'uvicorn.access', 'httpx'):
+for noisy in ('mcp', 'uvicorn.access', 'httpx', 'azure'):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 log = logging.getLogger('whatsnext_mcp')
 
@@ -155,7 +156,9 @@ async def find_venues(latitude: float, longitude: float, query: str | None = Non
 
 def build_app():
     app = server.streamable_http_app(stateless_http=True, json_response=True, host='0.0.0.0')
-    return GuardMiddleware(app, api_key=os.environ.get('MCP_API_KEY'))
+    guarded = GuardMiddleware(app, api_key=os.environ.get('MCP_API_KEY'),
+                              global_per_hour=int(os.environ.get('MCP_GLOBAL_PER_HOUR', GLOBAL_PER_HOUR)))
+    return instrument(guarded)
 
 
 if __name__ == '__main__':

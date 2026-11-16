@@ -22,9 +22,12 @@ All tools are annotated read-only and idempotent and return structured JSON with
   user-facing fields are returned.
 - **Prompt-injection hygiene.** Venue-written text is flattened to one line, stripped of control characters,
   and capped at 300 characters. What's Next's own description is preferred over the venue's.
-- **Abuse controls** (`guard.py`): per-IP limit (30/min), global cap (1,500/hour), optional API key
+- **Abuse controls** (`guard.py`): per-IP limit (30/min), global cap (300/hour per instance, sized to What's Next's small database; `MCP_GLOBAL_PER_HOUR` overrides), optional API key
   (`MCP_API_KEY`) for an unlisted launch, 5-minute response cache.
 - **Stateless streamable HTTP**, so any instance can serve any request.
+- **Own telemetry** (`telemetry.py`): requests (including 401/429), one span per tool call, and this server's
+  log lines go to Application Insights through OpenTelemetry. The Functions host doesn't record proxied requests
+  reliably, and Flex has no HTTP-status metrics. Two log alerts email the owner: server errors, and sustained 429s.
 
 ## Hosting
 
@@ -32,6 +35,10 @@ Azure Functions **Flex Consumption** as a custom handler (`host.json`, `configur
 mcp-custom-handler`, preview). It scales to zero and is capped at 2 instances as a cost ceiling.
 Rate-limit state is in-process, so with 2 instances the effective limits can be up to twice the configured
 ones. At higher scale, API Management or Redis would hold it instead.
+
+Gotcha: the host proxies requests from inside the instance and rewrites `X-Forwarded-For` to `127.0.0.1`. The
+caller's address is in the front end's `CLIENT-IP` header, which the front end overwrites (a spoofed value doesn't
+get through; tested). `guard.client_ip` reads that first.
 
 Gotcha: set the HTTP trigger's `perInstanceConcurrency` explicitly (`provision.sh` does). With it unset and a
 1-2 instance cap, the Flex front end queued requests for 15-45 s before they ever reached the host.

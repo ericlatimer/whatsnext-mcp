@@ -37,6 +37,13 @@ def test_client_ip_takes_rightmost_public_forwarded_address():
     assert client_ip(scope) == '1.1.1.1'
 
 
+def test_client_ip_prefers_azure_client_ip_header():
+    # What the Functions host actually sends (seen in prod logs, 2026-11-16).
+    scope = _scope({'x-forwarded-for': '127.0.0.1', 'client-ip': '24.17.215.191:52049'})
+    assert client_ip(scope) == '24.17.215.191'
+    assert client_ip(_scope({'client-ip': '[2001:4860:4860::8888]:443'})) == '2001:4860:4860::8888'
+
+
 def test_client_ip_falls_back_to_socket_peer():
     assert client_ip(_scope()) == '10.0.0.5'
     assert client_ip(_scope({'x-forwarded-for': 'garbage, 192.168.1.1'})) == '10.0.0.5'
