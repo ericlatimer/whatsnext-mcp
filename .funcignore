@@ -9,3 +9,4 @@ local.settings.json
 deploy/
 *.md
 LICENSE
+deploy.sh

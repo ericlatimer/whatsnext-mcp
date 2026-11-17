@@ -44,8 +44,9 @@ Gotcha: set the HTTP trigger's `perInstanceConcurrency` explicitly (`provision.s
 1-2 instance cap, the Flex front end queued requests for 15-45 s before they ever reached the host.
 
 ```bash
-deploy/provision.sh            # resource group, storage, function app, settings, publish
-deploy/provision.sh publish    # code-only redeploy
+./deploy.sh                    # routine deploy: tests, git push, publish, live edge-case checks
+ALERT_EMAIL=you@example.com deploy/provision.sh   # one-time setup: resources, scale settings, alerts, publish
+REQUIRE_KEY=1 ALERT_EMAIL=... deploy/provision.sh # same, but require an API key (unlisted launch)
 ```
 
 ## Local development
