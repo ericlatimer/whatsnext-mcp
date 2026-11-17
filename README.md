@@ -4,6 +4,29 @@ A public, read-only [MCP](https://modelcontextprotocol.io) server for live beer 
 [What's Next](https://whatsnext.beer): what's on tap right now at bars, bottle shops and breweries,
 mostly in the Seattle area.
 
+## Use it
+
+Public, no key or account needed. Server URL:
+
+```
+https://whatsnext-mcp.azurewebsites.net/mcp
+```
+
+- **Claude Code:** `claude mcp add --transport http whatsnext https://whatsnext-mcp.azurewebsites.net/mcp`
+- **Claude.ai / Claude Desktop:** Settings → Connectors → add a custom connector with the URL above.
+- **VS Code** (`.vscode/mcp.json`):
+  ```json
+  { "servers": { "whatsnext": { "type": "http", "url": "https://whatsnext-mcp.azurewebsites.net/mcp" } } }
+  ```
+- **Cursor** (`~/.cursor/mcp.json`):
+  ```json
+  { "mcpServers": { "whatsnext": { "url": "https://whatsnext-mcp.azurewebsites.net/mcp" } } }
+  ```
+- **Try the tools by hand:** `npx @modelcontextprotocol/inspector`, then connect to the URL (transport: Streamable HTTP).
+
+Then ask things like "what fresh hop beers are on tap near Ballard?" or "what's pouring at Holy Mountain?".
+Coverage is mostly the Seattle area. Fair use: 30 requests a minute per caller.
+
 ## Tools
 
 | Tool | What it does |
